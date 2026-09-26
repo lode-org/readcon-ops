@@ -64,6 +64,11 @@ def identical(frame_a, frame_b, epsilon_r: float) -> bool:
     return True
 
 
+def get_rotation_matrix(axis: np.ndarray, theta: float) -> np.ndarray:
+    """Name used by existing eOn callers."""
+    return rotation_matrix(axis, theta)
+
+
 def rotation_matrix(axis: np.ndarray, theta: float) -> np.ndarray:
     axis = axis / np.linalg.norm(axis)
     ct = np.cos(theta)
