@@ -12,6 +12,7 @@ from readcon_ops.match import (
     rotational_match,
     spacegroup,
 )
+from readcon_ops.wulff import wulff_vertices
 
 __all__ = [
     "identical",
@@ -19,4 +20,5 @@ __all__ = [
     "rotate",
     "rotational_match",
     "spacegroup",
+    "wulff_vertices",
 ]
