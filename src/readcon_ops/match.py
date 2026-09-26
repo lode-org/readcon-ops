@@ -51,6 +51,32 @@ def rotational_match(frame_a, frame_b, epsilon_r: float, ira=None, atomic_number
     return float(hausdorff) < float(epsilon_r)
 
 
+def spacegroup(frame, atomic_number, symprec: float = 1e-5):
+    """International symbol and number for a periodic crystal.
+
+    Positions are Cartesian. ``frame.box`` holds the lattice vectors as
+    rows. This is the bulk-crystal label. It does not decide whether two
+    clusters match under a permutation.
+    """
+    import spglib
+
+    lattice = np.asarray(frame.box, dtype=float).reshape(3, 3)
+    cartesian = np.asarray(frame.r, dtype=float)
+    fractional = np.dot(cartesian, np.linalg.inv(lattice))
+    numbers = [int(atomic_number(name)) for name in frame.names]
+    dataset = spglib.get_symmetry_dataset((lattice, fractional, numbers), symprec=symprec)
+    if dataset is None:
+        return None
+    international = getattr(dataset, "international", None)
+    number = getattr(dataset, "number", None)
+    if international is None and isinstance(dataset, dict):
+        international = dataset.get("international")
+        number = dataset.get("number")
+    if number is None:
+        return None
+    return {"international": str(international), "number": int(number)}
+
+
 def identical(frame_a, frame_b, epsilon_r: float) -> bool:
     """True when same-element atoms match within ``epsilon_r``.
 

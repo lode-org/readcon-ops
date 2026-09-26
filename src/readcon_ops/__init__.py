@@ -5,6 +5,18 @@ those frames. This package compares two frames and removes rigid motion.
 It does not read a file.
 """
 
-from readcon_ops.match import identical, internal_motion, rotate, rotational_match
+from readcon_ops.match import (
+    identical,
+    internal_motion,
+    rotate,
+    rotational_match,
+    spacegroup,
+)
 
-__all__ = ["identical", "internal_motion", "rotate", "rotational_match"]
+__all__ = [
+    "identical",
+    "internal_motion",
+    "rotate",
+    "rotational_match",
+    "spacegroup",
+]

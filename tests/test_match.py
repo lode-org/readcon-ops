@@ -32,6 +32,20 @@ def test_identical_accepts_a_swap():
     assert identical(a, b, 0.1) is True
 
 
+def test_fcc_copper_spacegroup_is_225():
+    from readcon_ops import spacegroup
+
+    lattice = 3.6 * np.eye(3)
+    fractional = np.array(
+        [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.5, 0.0, 0.5], [0.0, 0.5, 0.5]]
+    )
+    frame = Frame(fractional @ lattice)
+    frame.box = lattice
+    info = spacegroup(frame, atomic_number=lambda name: 29)
+    assert info["number"] == 225
+    assert info["international"] == "Fm-3m"
+
+
 def test_rotational_match_uses_the_supplied_ira():
     from readcon_ops import rotational_match
 
