@@ -20,6 +20,9 @@ Repository = "https://github.com/lode-org/readcon-ops"
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/readcon_ops"]
 
