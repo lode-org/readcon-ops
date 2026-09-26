@@ -1,6 +1,7 @@
 import numpy as np
 
 from readcon_ops import identical, internal_motion
+from readcon_ops.match import per_atom_distance
 
 
 class Frame:
@@ -29,6 +30,13 @@ def test_identical_accepts_a_swap():
     a = Frame([[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
     b = Frame([[3.01, 0.0, 0.0], [0.01, 0.0, 0.0]])
     assert identical(a, b, 0.1) is True
+
+
+def test_distance_matches_the_minimage_readme():
+    dr = np.array([[9.2, 0.0, 0.0]])
+    box = np.diag([10.0, 10.0, 10.0])
+    distance = per_atom_distance(dr, box)
+    assert abs(distance[0] ** 2 - 0.64) < 1e-9
 
 
 def test_internal_motion_lands_the_first_atom():

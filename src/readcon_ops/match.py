@@ -14,12 +14,16 @@ logger = logging.getLogger("readcon_ops")
 
 
 def per_atom_distance(dr: np.ndarray, box: np.ndarray) -> np.ndarray:
-    """Euclidean norm of each row after the minimum-image wrap."""
-    ibox = np.linalg.inv(box)
-    fractional = np.dot(dr, ibox)
-    wrapped = (fractional % 1.0 + 1.5) % 1.0 - 0.5
-    cartesian = np.dot(wrapped, box)
-    return np.sqrt(np.sum(cartesian**2.0, axis=1))
+    """Euclidean norm of each row after the minimum-image wrap.
+
+    The wrap is :mod:`minimage`, the same kernel vesin and linkcell use.
+    """
+    import minimage
+
+    cell = minimage.Cell.from_vesin(np.asarray(box, dtype=float).reshape(3, 3).tolist())
+    rows = np.atleast_2d(np.asarray(dr, dtype=float))
+    wrapped = np.asarray(cell.wrap_many(rows), dtype=float)
+    return np.sqrt(np.sum(wrapped**2.0, axis=1))
 
 
 def identical(frame_a, frame_b, epsilon_r: float) -> bool:

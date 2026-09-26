@@ -1,12 +1,15 @@
 [project]
 name = "readcon-ops"
-version = "0.1.0"
+version = "0.1.1"
 description = "Comparisons and rigid alignment of readcon frames. Not the CON codec and not the corpus."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 requires-python = ">=3.11"
 authors = [{name = "Rohit Goswami", email = "rgoswami@ieee.org"}]
-dependencies = ["numpy>=1.24"]
+dependencies = [
+  "numpy>=1.24",
+  "minimage @ git+https://github.com/lode-org/minimage.git@v0.1.1",
+]
 keywords = ["readcon", "con", "structure", "matching"]
 
 [project.urls]
