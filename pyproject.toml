@@ -8,7 +8,7 @@ requires-python = ">=3.11"
 authors = [{name = "Rohit Goswami", email = "rgoswami@ieee.org"}]
 dependencies = [
   "numpy>=1.24",
-  "minimage @ git+https://github.com/lode-org/minimage.git@v0.1.1",
+  "minimage @ git+https://github.com/lode-org/minimage.git@0545e172d88a887c6d9d8e3977e5c12fc1ba6f38",
 ]
 keywords = ["readcon", "con", "structure", "matching"]
 
