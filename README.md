@@ -19,4 +19,4 @@ same = identical(frame_a, frame_b, epsilon_r=0.1)
 aligned = internal_motion(frame_a, frame_b)
 ```
 
-`identical` keeps an index-matched atom taken, so a second atom cannot claim that site. Distances use [minimage](https://github.com/lode-org/minimage) v0.1.1, the same wrap as vesin and linkcell. `rotational_match` calls IRA (`pyeonclient._core.ira_match`) when that binding is present and returns `None` when it is not. It does not call spglib. `internal_motion` translates the first atom of the second frame onto the first atom of the reference, then skips a rotation when the bond is already parallel.
+`identical` keeps an index-matched atom taken, so a second atom cannot claim that site. Distances use [minimage](https://github.com/lode-org/minimage) v0.1.1, the same wrap as vesin and linkcell. `rotational_match` calls Iterative Rotations and Assignments (`pyeonclient._core.ira_match`) when that binding is present and returns `None` when it is not. It does not call a space-group library. `internal_motion` translates the first atom of the second frame onto the first atom of the reference, then skips a rotation when the bond is already parallel.
