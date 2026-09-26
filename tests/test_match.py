@@ -32,6 +32,24 @@ def test_identical_accepts_a_swap():
     assert identical(a, b, 0.1) is True
 
 
+def test_rotational_match_uses_the_supplied_ira():
+    from readcon_ops import rotational_match
+
+    a = Frame([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    b = Frame([[0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
+    calls = {}
+
+    def ira(r1, z1, r2, z2, thresh):
+        calls["n"] = (len(z1), len(z2), thresh)
+        return 0.05, 0
+
+    assert rotational_match(a, b, 0.1, ira=ira, atomic_number=lambda name: 29) is True
+    assert calls["n"] == (2, 2, 0.1)
+    assert rotational_match(a, b, 0.1, ira=lambda *args: (2.0, 0), atomic_number=lambda name: 29) is False
+    assert rotational_match(a, b, 0.1, ira=lambda *args: (0.0, 1), atomic_number=lambda name: 29) is None
+    assert rotational_match(a, b, 0.1) is None
+
+
 def test_distance_matches_the_minimage_readme():
     dr = np.array([[9.2, 0.0, 0.0]])
     box = np.diag([10.0, 10.0, 10.0])

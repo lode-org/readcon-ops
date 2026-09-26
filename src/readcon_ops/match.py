@@ -26,6 +26,31 @@ def per_atom_distance(dr: np.ndarray, box: np.ndarray) -> np.ndarray:
     return np.sqrt(np.sum(wrapped**2.0, axis=1))
 
 
+def rotational_match(frame_a, frame_b, epsilon_r: float, ira=None, atomic_number=None):
+    """True when IRA's Hausdorff distance is inside ``epsilon_r``.
+
+    ``ira`` is the eOn binding ``pyeonclient._core.ira_match`` or a callable
+    with that signature: positions, atomic numbers, positions, atomic
+    numbers, threshold, returning ``(hausdorff, error)``. ``None`` means
+    IRA is not available. This is not a space-group test.
+    """
+    if ira is None:
+        try:
+            from pyeonclient import _core
+
+            ira = getattr(_core, "ira_match", None)
+        except Exception:
+            ira = None
+    if ira is None or atomic_number is None:
+        return None
+    z1 = [int(atomic_number(name)) for name in frame_a.names]
+    z2 = [int(atomic_number(name)) for name in frame_b.names]
+    hausdorff, err = ira(frame_a.r, z1, frame_b.r, z2, float(epsilon_r))
+    if err != 0:
+        return None
+    return float(hausdorff) < float(epsilon_r)
+
+
 def identical(frame_a, frame_b, epsilon_r: float) -> bool:
     """True when same-element atoms match within ``epsilon_r``.
 
