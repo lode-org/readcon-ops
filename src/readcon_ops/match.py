@@ -43,9 +43,15 @@ def rotational_match(frame_a, frame_b, epsilon_r: float, ira=None, atomic_number
             ira = None
     if ira is None or atomic_number is None:
         return None
-    z1 = [int(atomic_number(name)) for name in frame_a.names]
-    z2 = [int(atomic_number(name)) for name in frame_b.names]
-    hausdorff, err = ira(frame_a.r, z1, frame_b.r, z2, float(epsilon_r))
+    pos1 = np.ascontiguousarray(frame_a.r, dtype=np.float64)
+    pos2 = np.ascontiguousarray(frame_b.r, dtype=np.float64)
+    z1 = np.ascontiguousarray(
+        [int(atomic_number(name)) for name in frame_a.names], dtype=np.int64
+    )
+    z2 = np.ascontiguousarray(
+        [int(atomic_number(name)) for name in frame_b.names], dtype=np.int64
+    )
+    hausdorff, err = ira(pos1, z1, pos2, z2, float(epsilon_r))
     if err != 0:
         return None
     return float(hausdorff) < float(epsilon_r)
