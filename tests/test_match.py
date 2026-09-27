@@ -44,6 +44,25 @@ def test_fcc_copper_spacegroup_is_225():
     info = spacegroup(frame, atomic_number=lambda name: 29)
     assert info["number"] == 225
     assert info["international"] == "Fm-3m"
+    assert info["hall_number"] > 0
+
+
+def test_primitive_fcc_is_not_called_rhombohedral():
+    """A 60-degree primitive cell of fcc is still Fm-3m, number 225.
+
+    The same metric looks rhombohedral. The space group comes from the
+    atoms in that cell, not from the angles.
+    """
+    from readcon_ops import spacegroup
+
+    a = 3.6
+    lattice = 0.5 * a * np.array([[0.0, 1.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 0.0]])
+    frame = Frame([[0.0, 0.0, 0.0]])
+    frame.box = lattice
+    info = spacegroup(frame, atomic_number=lambda name: 29)
+    assert info["number"] == 225
+    assert info["number"] != 166
+    assert info["hall_number"] > 0
 
 
 def test_rotational_match_uses_the_supplied_ira():

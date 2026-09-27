@@ -51,12 +51,21 @@ def rotational_match(frame_a, frame_b, epsilon_r: float, ira=None, atomic_number
     return float(hausdorff) < float(epsilon_r)
 
 
+def _symmetry_field(dataset, name):
+    if isinstance(dataset, dict):
+        return dataset.get(name)
+    return getattr(dataset, name, None)
+
+
 def spacegroup(frame, atomic_number, symprec: float = 1e-5):
-    """International symbol and number for a periodic crystal.
+    """International symbol, number, and Hall number for a periodic crystal.
 
     Positions are Cartesian. ``frame.box`` holds the lattice vectors as
-    rows. This is the bulk-crystal label. It does not decide whether two
-    clusters match under a permutation.
+    rows. The international number is shared by every setting of a group.
+    ``hall_number`` is the setting: the hexagonal-axes and rhombohedral-axes
+    forms of one rhombohedral group are different Hall numbers. The label
+    comes from the atoms and the cell. Lengths and angles alone are not a
+    space group. This does not decide whether two clusters match.
     """
     import spglib
 
@@ -67,14 +76,23 @@ def spacegroup(frame, atomic_number, symprec: float = 1e-5):
     dataset = spglib.get_symmetry_dataset((lattice, fractional, numbers), symprec=symprec)
     if dataset is None:
         return None
-    international = getattr(dataset, "international", None)
-    number = getattr(dataset, "number", None)
-    if international is None and isinstance(dataset, dict):
-        international = dataset.get("international")
-        number = dataset.get("number")
-    if number is None:
+    international = _symmetry_field(dataset, "international")
+    number = _symmetry_field(dataset, "number")
+    hall_number = _symmetry_field(dataset, "hall_number")
+    if number is None or hall_number is None:
         return None
-    return {"international": str(international), "number": int(number)}
+    result = {
+        "international": str(international),
+        "number": int(number),
+        "hall_number": int(hall_number),
+    }
+    hall = _symmetry_field(dataset, "hall")
+    if hall:
+        result["hall"] = str(hall)
+    choice = _symmetry_field(dataset, "choice")
+    if choice:
+        result["choice"] = str(choice)
+    return result
 
 
 def identical(frame_a, frame_b, epsilon_r: float) -> bool:
