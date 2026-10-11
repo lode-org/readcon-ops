@@ -1,0 +1,56 @@
+#+TITLE: API
+#+OPTIONS: toc:nil num:nil ^:nil
+
+* as_frame
+
+~as_frame(obj)~ returns a ~Frame~ with ~r~, ~box~, ~names~, ~masses~, ~pbc~, ~periodic~, ~copy~, and ~__len__~.
+Raises ~TypeError~ when the object is neither protocol.
+Raises ~ValueError~ for a bad shape, a non-finite coordinate, a non-bool ~pbc~ entry, or a degenerate cell.
+
+* internal_motion
+
+~internal_motion(frame_a, frame_b, masses=None)~ returns an ~AlignedFrame~.
+
+- Non-periodic: Kabsch rotation. ~rotation~ is the right-multiplier of centered mobile rows. ~det(rotation)~ is +1.
+- Collinear: ~undefined_axis~ is the unit axis. The matrix maps one axis onto the other and adds no spin about it.
+- Rank 0: translation only. ~rotation~ and ~undefined_axis~ are ~None~.
+- Periodic: ~rotation~ is ~None~. The mean minimum-image translation is removed. Open axes are not wrapped.
+- ~rmsd~ is the unweighted root-mean-square distance in angstrom.
+- ~masses~ must be finite, non-negative, and sum to a positive value. The length is the atom count.
+
+Path RMSDs that consume this superposition are described by R. Goswami, MethodsX 2026, doi:10.1016/j.mex.2026.103851.
+The rotation is the Kabsch method, W. Kabsch, Acta Crystallogr. A 32, 922-923, 1976, doi:10.1107/S0567739476001873.
+
+* identical
+
+~identical(frame_a, frame_b, epsilon_r)~ is true when same-element atoms match within ~epsilon_r~ under the minimum image.
+An index match stays taken.
+Boxes that differ by more than ~0.0001~ angstrom make the result false.
+
+* spacegroup
+
+~spacegroup(frame, atomic_number, symprec=1e-5)~ calls ~spglib.get_symmetry_dataset~.
+The result is a dict with ~international~, ~number~, and ~hall_number~, or ~None~ when spglib returns no dataset.
+Positions are Cartesian. The box rows are the lattice vectors.
+
+* rotational_match
+
+~rotational_match(frame_a, frame_b, epsilon_r, ira=None, atomic_number=None)~ is true when IRA's Hausdorff distance is inside ~epsilon_r~.
+~ira~ defaults to ~pyeonclient._core.ira_match~ when that module imports.
+The function returns ~None~ when IRA is absent, when ~atomic_number~ is omitted, or when IRA reports a non-zero error.
+It does not call spglib.
+
+* per_atom_distance
+
+~per_atom_distance(dr, box)~ is the Euclidean norm of each row after the minimage wrap.
+The dependency is minimage commit ~0545e172d88a887c6d9d8e3977e5c12fc1ba6f38~ (tag v0.1.1).
+
+* wulff_vertices
+
+~wulff_vertices(normals, energies, tol=1e-8)~ returns an ~(V, 3)~ array of vertices.
+See the how-to for the plane equation.
+
+* rotate
+
+~rotate(coordinates, axis, center, angle)~ and ~rotation_matrix(axis, theta)~ rotate row coordinates.
+~get_rotation_matrix~ is the name existing eOn callers use.

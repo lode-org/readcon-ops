@@ -1,0 +1,19 @@
+#+TITLE: Citation
+#+OPTIONS: toc:nil num:nil ^:nil
+
+* Citation
+
+Cite the software with the author record in ~CITATION.cff~: Rohit Goswami, ORCID [[https://orcid.org/0000-0002-2393-8056][0000-0002-2393-8056]].
+
+Papers, Rohit Goswami first:
+
+1. R. Goswami, MethodsX 16, 103899, 2026. [[https://doi.org/10.1016/j.mex.2026.103899][doi:10.1016/j.mex.2026.103899]]. Reproducible NEB orchestration. The checkpoints are CON.
+2. R. Goswami, MethodsX 16, 103851, 2026. [[https://doi.org/10.1016/j.mex.2026.103851][doi:10.1016/j.mex.2026.103851]]. Two-dimensional RMSD projections over CON paths. ~internal_motion~ is the superposition those projections use.
+3. R. Goswami, M. Masterov, S. Kamath, A. Peña-Torres, and H. Jónsson, J. Chem. Theory Comput. 21, 7935-7943, 2025. [[https://doi.org/10.1021/acs.jctc.5c00866][doi:10.1021/acs.jctc.5c00866]]. Gaussian-process saddle searches in eOn.
+
+eOn itself:
+
+4. S. T. Chill, M. Welborn, R. Terrell, L. Zhang, J.-C. Berthet, A. Pedersen, H. Jónsson, and G. Henkelman, Modelling Simul. Mater. Sci. Eng. 22, 055002, 2014. [[https://doi.org/10.1088/0965-0393/22/5/055002][doi:10.1088/0965-0393/22/5/055002]].
+
+The Kabsch rotation cited from the alignment pages is W. Kabsch, Acta Crystallogr. A 32, 922-923, 1976. [[https://doi.org/10.1107/S0567739476001873][doi:10.1107/S0567739476001873]].
+

@@ -1,0 +1,92 @@
+cff-version: 1.2.0
+title: "readcon-ops: frame comparison, Kabsch alignment, and Wulff vertices"
+message: "If you use readcon-ops, please cite the papers listed below."
+type: software
+authors:
+  - given-names: Rohit
+    family-names: Goswami
+    email: rgoswami@ieee.org
+    orcid: "https://orcid.org/0000-0002-2393-8056"
+license: BSD-3-Clause
+repository-code: "https://github.com/lode-org/readcon-ops"
+version: 0.1.1
+date-released: "2026-09-26"
+preferred-citation:
+  type: article
+  title: "Two-dimensional RMSD projections for reaction path visualization and validation"
+  authors:
+    - given-names: Rohit
+      family-names: Goswami
+      orcid: "https://orcid.org/0000-0002-2393-8056"
+  journal: MethodsX
+  volume: 16
+  start: 103851
+  year: 2026
+  doi: 10.1016/j.mex.2026.103851
+references:
+  - type: article
+    title: "Reproducible orchestration of best practices for reaction path optimization with the nudged elastic band"
+    authors:
+      - given-names: Rohit
+        family-names: Goswami
+        orcid: "https://orcid.org/0000-0002-2393-8056"
+    journal: MethodsX
+    volume: 16
+    start: 103899
+    year: 2026
+    doi: 10.1016/j.mex.2026.103899
+  - type: article
+    title: "Two-dimensional RMSD projections for reaction path visualization and validation"
+    authors:
+      - given-names: Rohit
+        family-names: Goswami
+        orcid: "https://orcid.org/0000-0002-2393-8056"
+    journal: MethodsX
+    volume: 16
+    start: 103851
+    year: 2026
+    doi: 10.1016/j.mex.2026.103851
+  - type: article
+    title: "Efficient Implementation of Gaussian Process Regression Accelerated Saddle Point Searches with Application to Molecular Reactions"
+    authors:
+      - given-names: Rohit
+        family-names: Goswami
+        orcid: "https://orcid.org/0000-0002-2393-8056"
+      - given-names: Maxim
+        family-names: Masterov
+      - given-names: Satish
+        family-names: Kamath
+      - given-names: Alejandro
+        family-names: "Peña-Torres"
+      - given-names: Hannes
+        family-names: "Jónsson"
+    journal: Journal of Chemical Theory and Computation
+    volume: 21
+    start: 7935
+    end: 7943
+    year: 2025
+    doi: 10.1021/acs.jctc.5c00866
+  - type: article
+    title: "EON: software for long time simulations of atomic scale systems"
+    authors:
+      - given-names: Samuel T.
+        family-names: Chill
+      - given-names: Matthew
+        family-names: Welborn
+      - given-names: Rye
+        family-names: Terrell
+      - given-names: Liang
+        family-names: Zhang
+      - given-names: Jean-Claude
+        family-names: Berthet
+      - given-names: Andreas
+        family-names: Pedersen
+      - given-names: Hannes
+        family-names: "Jónsson"
+      - given-names: Graeme
+        family-names: Henkelman
+    journal: Modelling and Simulation in Materials Science and Engineering
+    volume: 22
+    start: "055002"
+    year: 2014
+    doi: 10.1088/0965-0393/22/5/055002

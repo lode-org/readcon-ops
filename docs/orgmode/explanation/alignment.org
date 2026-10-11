@@ -1,0 +1,41 @@
+#+TITLE: Why the alignment is split
+#+OPTIONS: toc:nil num:nil ^:nil
+
+* A cell does not rotate
+
+A rotation is not a symmetry of a general cell.
+Turning a periodic frame to reduce the RMSD moves atoms off the lattice that the cell describes.
+~internal_motion~ therefore removes only the mean minimum-image translation when either frame is periodic.
+Missing ~pbc~ is periodic on all three axes (CON D12), which is the same rule the CON reader uses.
+A free cluster sets every flag false and then takes the Kabsch path.
+
+The minimum image is taken along periodic axes only.
+An open direction keeps its Cartesian displacement, so a slab is not folded through the vacuum.
+
+* Kabsch, the sign guard, and a free axis
+
+The non-periodic path is the superposition used for path RMSDs by R. Goswami, MethodsX 2026, doi:10.1016/j.mex.2026.103851.
+The rotation itself is W. Kabsch, Acta Crystallogr. A 32, 922-923, 1976, doi:10.1107/S0567739476001873.
+
+Centroids are removed, the weighted covariance is factored by an SVD, and the determinant-sign guard flips the last singular vector when the product would be a reflection.
+The matrix that remains has determinant +1.
+
+Optional masses weight both the centroids and the covariance.
+Uniform weights are the default.
+A rigid motion is recovered for any positive weights.
+Weights change the result only when the two frames are not the same shape.
+
+When the covariance rank drops below 2, a spin about the leading axis does not change the RMSD.
+The returned matrix is the rigid motion that maps one axis onto the other and adds no further spin.
+~undefined_axis~ reports that axis.
+An antiparallel bond is the rank-1 case with angle pi.
+It is aligned.
+The older bond alignment from atom 0 to atom 1 skipped that case, because the cross product is zero, and it also left any twist about the bond in place.
+
+A single point, or several atoms on one point, has no axis.
+The frame is translated and ~rotation~ stays ~None~.
+
+* What this package does not read
+
+Velocity units, section grammar, and the other CON codec rules live in readcon-core.
+This package never writes a file, so it does not relabel a velocity or invent a time unit.

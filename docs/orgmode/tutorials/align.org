@@ -1,0 +1,36 @@
+#+TITLE: Align two frames
+#+OPTIONS: toc:nil num:nil ^:nil
+
+* Align a free cluster
+
+A free cluster has ~pbc~ false on every axis.
+Missing ~pbc~ means the frame is periodic, and a periodic frame is not rotated.
+
+#+begin_src python
+import numpy as np
+from readcon_ops import internal_motion, rotate
+
+class Frame:
+    def __init__(self, positions):
+        self.r = np.asarray(positions, dtype=float)
+        self.box = np.eye(3) * 40.0
+        self.names = ["Cu"] * len(self.r)
+        self.pbc = (False, False, False)
+
+    def __len__(self):
+        return len(self.r)
+
+reference = Frame([[0.0, 0.0, 0.0], [1.2, 0.1, 0.0], [0.2, 0.9, 0.3]])
+moved = Frame(rotate(reference.r, np.array([0.2, 0.5, 0.8]), np.zeros(3), 1.1))
+aligned = internal_motion(reference, moved)
+print(aligned.rmsd)
+#+end_src
+
+The RMSD is in angstrom.
+A pure rigid motion of a non-periodic frame comes back below ~1e-12~.
+
+* Leave a crystal unrotated
+
+Set ~pbc~ true, or omit it.
+~internal_motion~ then subtracts the mean minimum-image translation and does not rotate.
+An open axis (a false entry in ~pbc~) is not wrapped.

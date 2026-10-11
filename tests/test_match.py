@@ -36,9 +36,7 @@ def test_fcc_copper_spacegroup_is_225():
     from readcon_ops import spacegroup
 
     lattice = 3.6 * np.eye(3)
-    fractional = np.array(
-        [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.5, 0.0, 0.5], [0.0, 0.5, 0.5]]
-    )
+    fractional = np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.5, 0.0, 0.5], [0.0, 0.5, 0.5]])
     frame = Frame(fractional @ lattice)
     frame.box = lattice
     info = spacegroup(frame, atomic_number=lambda name: 29)
@@ -78,8 +76,14 @@ def test_rotational_match_uses_the_supplied_ira():
 
     assert rotational_match(a, b, 0.1, ira=ira, atomic_number=lambda name: 29) is True
     assert calls["n"] == (2, 2, 0.1)
-    assert rotational_match(a, b, 0.1, ira=lambda *args: (2.0, 0), atomic_number=lambda name: 29) is False
-    assert rotational_match(a, b, 0.1, ira=lambda *args: (0.0, 1), atomic_number=lambda name: 29) is None
+    assert (
+        rotational_match(a, b, 0.1, ira=lambda *args: (2.0, 0), atomic_number=lambda name: 29)
+        is False
+    )
+    assert (
+        rotational_match(a, b, 0.1, ira=lambda *args: (0.0, 1), atomic_number=lambda name: 29)
+        is None
+    )
     assert rotational_match(a, b, 0.1) is None
 
 
