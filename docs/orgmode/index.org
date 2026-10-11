@@ -1,0 +1,39 @@
+#+TITLE: readcon-ops
+#+AUTHOR: Rohit Goswami
+#+OPTIONS: toc:nil num:nil title:nil author:nil ^:nil
+
+#+begin_export rst
+============
+readcon-ops
+============
+
+Comparisons, rigid alignment, and Wulff vertices for coordinate frames.
+The package does not open a file. ``readcon`` parses a frame.
+``readcon-db`` stores a corpus. This package compares two frames.
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Tutorials
+
+   tutorials/align
+
+.. toctree::
+   :maxdepth: 2
+   :caption: How-to guides
+
+   howto/frames
+   howto/wulff
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Reference
+
+   reference/api
+   citation
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Explanation
+
+   explanation/alignment
+#+end_export

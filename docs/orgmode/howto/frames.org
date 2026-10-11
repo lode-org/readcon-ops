@@ -1,0 +1,28 @@
+#+TITLE: Pass a ConFrame or a pyeonclient frame
+#+OPTIONS: toc:nil num:nil ^:nil
+
+* Two inputs, one frame
+
+~as_frame~ accepts either object.
+
+A pyeonclient frame has ~r~ ~(N, 3)~, ~box~ ~(3, 3)~, ~names~, and ~__len__~.
+Optional ~pbc~ is three bools. Optional ~masses~ has one value per atom.
+
+A ~readcon.ConFrame~ has ~cell~ (lengths), ~angles~ (alpha, beta, gamma in degrees), and ~atoms~.
+Each atom has ~symbol~, ~x~, ~y~, and ~z~, and may have ~mass~.
+~xyz~ is used for positions when it is present.
+~metadata["lattice_vectors"]~ is three row vectors and replaces the length-angle cell.
+~metadata["pbc"]~ is three bools. If it is absent, the frame is periodic in all three directions (CON D12).
+
+The cell puts ~a~ along x and ~b~ in the xy plane, the same construction as eOn ~client/ConFileIO.cpp~.
+
+* Mass weights
+
+~internal_motion(frame_a, frame_b, masses=weights)~ weights the Kabsch centroids and the covariance.
+The default is a uniform weight. A ~ConFrame~ mass array is available as ~as_frame(frame).masses~ and is not applied unless you pass it.
+
+* Correspondence
+
+~internal_motion~ matches atom i to atom i.
+It does not permute.
+~identical~ may rematch an unmatched atom of the same name inside ~epsilon_r~, and an index-matched atom stays taken.

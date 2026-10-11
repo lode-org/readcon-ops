@@ -1,0 +1,31 @@
+#+TITLE: Wulff vertices
+#+OPTIONS: toc:nil num:nil ^:nil
+
+* Facet energies to vertices
+
+~wulff_vertices(normals, energies)~ returns the vertices of the polyhedron.
+~normals~ is ~(F, 3)~ and need not be a unit set.
+~energies~ is one positive surface energy per facet.
+The plane equation, after the normal is scaled to unit length, is ~n · x = energy~.
+A point is a vertex when it sits on three planes and behind every other plane.
+
+The function does not place atoms on the shape.
+
+#+begin_src python
+import numpy as np
+from readcon_ops import wulff_vertices
+
+normals = np.array(
+    [
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ]
+)
+vertices = wulff_vertices(normals, np.ones(6))
+#+end_src
+
+Equal energies on the six cubic facets give the eight corners of a cube of half-width 1.
