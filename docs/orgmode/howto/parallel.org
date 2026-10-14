@@ -22,10 +22,10 @@ ke = parallel.kinetic_energy(my_masses, my_velocities, comm=comm, exact=True)
 :PROPERTIES:
 :CUSTOM_ID: same-bits
 :END:
-Each compiled sum runs on one thread in a fixed four-lane order, so the thread count does not change the bits. Over MPI, frames go out in contiguous blocks and all-pairs tiles go out block-cyclically. Every entry is computed by one rank with the serial kernel. Sums never use a float =Allreduce=: the float path gathers values in rank order and sums once.
+Each compiled sum runs on one thread in a fixed four-lane order, so the thread count does not change the bits. Over MPI, frames go out in contiguous blocks. All-pairs RMSD is split into contiguous rows of the upper triangle, cut so each rank owns nearly the same number of pairs; within a rank those rows run on rayon threads. The packed doubles are gathered in rank order. Every entry is computed by one rank with the serial kernel. Sums never use a float =Allreduce=: the float path gathers values in rank order and sums once.
 
 ** Exact mode
 :PROPERTIES:
 :CUSTOM_ID: exact
 :END:
-With =exact=True=, centroids, total mass, the Kabsch covariance, RMSD, kinetic energy and band means are summed in a wide integer accumulator. Each double, and each product of two or three doubles, is added as an exact integer, and the total is rounded once to nearest, ties to even. The result does not depend on atom order, threads or ranks. A rank sends one 1,665-byte partial per quantity. The cost is in =bench/bench_kernels.py= and =bench/bench_parallel.py=.
+With =exact=True=, centroids, total mass, the Kabsch covariance, RMSD, kinetic energy and band means are summed in a wide integer accumulator. Each double, and each product of two or three doubles, is added as an exact integer, and the total is rounded once to nearest, ties to even. Short plain sums try a compensated pre-pass first and keep it only when an error bound proves that same rounding. The result does not depend on atom order, threads or ranks. A rank sends one 1,665-byte partial per quantity. The cost is in =bench/bench_kernels.py= and =bench/bench_parallel.py=.
