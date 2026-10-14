@@ -7,6 +7,13 @@
 //! split into `u128` terms. The accumulator rounds once, to nearest with
 //! ties to even, when the result is read.
 //!
+//! [`sum`] and [`dot`] try a compensated sum of error-free product splits
+//! first, and keep it only when a running error bound sits strictly inside
+//! the correctly rounded bin. Longer products ([`dot_prod`], [`dot_prod3`])
+//! stay on [`ExactAcc`]: once the bound is checked, the compensated loop is
+//! not faster than the integer product. Both roundings are the exact sum, so
+//! the bits do not depend on order.
+//!
 //! Integer addition is associative and commutative, so the result does not
 //! depend on the order of the terms, on how they are split across threads
 //! or MPI ranks, or on the order in which partial accumulators are merged.
@@ -26,7 +33,7 @@ const NORM_EVERY: u32 = 1 << 24;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExactAcc {
-    limbs: Vec<i64>,
+    limbs: [i64; N_LIMBS],
     pending: u32,
     nan: bool,
     pos_inf: bool,
@@ -55,7 +62,7 @@ fn decompose(x: f64) -> (u64, i32, bool) {
 impl ExactAcc {
     pub fn new() -> Self {
         ExactAcc {
-            limbs: vec![0; N_LIMBS],
+            limbs: [0; N_LIMBS],
             pending: 0,
             nan: false,
             pos_inf: false,
@@ -176,10 +183,10 @@ impl ExactAcc {
         if b.len() != 1 + 8 * N_LIMBS {
             return None;
         }
-        let limbs = b[1..]
-            .chunks_exact(8)
-            .map(|c| i64::from_le_bytes(c.try_into().unwrap()))
-            .collect();
+        let mut limbs = [0; N_LIMBS];
+        for (i, c) in b[1..].chunks_exact(8).enumerate() {
+            limbs[i] = i64::from_le_bytes(c.try_into().unwrap());
+        }
         Some(ExactAcc {
             limbs,
             pending: 0,
@@ -258,8 +265,205 @@ impl ExactAcc {
     }
 }
 
+const U: f64 = f64::from_bits(0x3ca0_0000_0000_0000); // 2^-53
+
+#[inline]
+fn next_up(x: f64) -> f64 {
+    let bits = x.to_bits();
+    if x.is_nan() || bits == f64::INFINITY.to_bits() {
+        return x;
+    }
+    let abs = bits & 0x7fff_ffff_ffff_ffff;
+    let next = if abs == 0 {
+        1
+    } else if bits == abs {
+        bits + 1
+    } else {
+        bits - 1
+    };
+    f64::from_bits(next)
+}
+
+#[inline]
+fn next_down(x: f64) -> f64 {
+    let bits = x.to_bits();
+    if x.is_nan() || bits == f64::NEG_INFINITY.to_bits() {
+        return x;
+    }
+    let abs = bits & 0x7fff_ffff_ffff_ffff;
+    let next = if abs == 0 {
+        0x8000_0000_0000_0001
+    } else if bits == abs {
+        bits - 1
+    } else {
+        bits + 1
+    };
+    f64::from_bits(next)
+}
+
+/// Compensated sum plus a strict overestimate of its absolute error.
+struct Run {
+    sum: f64,
+    comp: f64,
+    sigma: f64,
+    /// Non-zero once a subnormal, non-finite, or broken error bound appears.
+    flags: u64,
+}
+
+/// Subnormal or non-finite. Zero is allowed (it is exact).
+#[inline(always)]
+fn bad_class(x: f64) -> u64 {
+    let b = x.to_bits();
+    let exp = b & 0x7ff0_0000_0000_0000;
+    let frac = b & 0x000f_ffff_ffff_ffff;
+    u64::from((exp == 0 && frac != 0) || exp == 0x7ff0_0000_0000_0000)
+}
+
+impl Run {
+    fn new() -> Self {
+        Run {
+            sum: 0.0,
+            comp: 0.0,
+            sigma: 0.0,
+            flags: 0,
+        }
+    }
+
+    /// Add one term. FastTwoSum is exact while every value stays normal;
+    /// `flags` records a subnormal or an increment that underflowed.
+    #[inline(always)]
+    fn push(&mut self, x: f64) {
+        let (a, b) = if self.sum.abs() >= x.abs() {
+            (self.sum, x)
+        } else {
+            (x, self.sum)
+        };
+        let t = a + b;
+        let delta = (a - t) + b;
+        let c_new = self.comp + delta;
+        // |fl(c+delta)-(c+delta)| < 2 U (|c|+|delta|). Adding a relative
+        // 16 U afterwards covers that product and the sigma add rounding down.
+        let scale = self.comp.abs() + delta.abs();
+        let incr = (2.0 * U) * scale;
+        self.sigma += incr;
+        self.sigma += self.sigma * (16.0 * U);
+        self.flags |= bad_class(x)
+            | bad_class(t)
+            | bad_class(delta)
+            | bad_class(c_new)
+            | u64::from(scale != 0.0 && incr == 0.0)
+            | u64::from(!self.sigma.is_finite());
+        self.comp = c_new;
+        self.sum = t;
+    }
+
+    fn finish(self) -> Option<f64> {
+        if self.flags != 0 || !self.sigma.is_finite() {
+            return None;
+        }
+        let (a, b) = if self.sum.abs() >= self.comp.abs() {
+            (self.sum, self.comp)
+        } else {
+            (self.comp, self.sum)
+        };
+        if (a != 0.0 && !a.is_normal()) || (b != 0.0 && !b.is_normal()) {
+            return None;
+        }
+        let result = a + b;
+        if !(result == 0.0 || result.is_normal()) {
+            return None;
+        }
+        let delta = (a - result) + b;
+        if !(delta == 0.0 || delta.is_normal()) {
+            return None;
+        }
+        if result == 0.0 {
+            return if self.sigma == 0.0 && delta == 0.0 {
+                Some(0.0)
+            } else {
+                None
+            };
+        }
+        let up = next_up(result);
+        let down = next_down(result);
+        if !up.is_finite() || !down.is_finite() {
+            return None;
+        }
+        let gap = ((up - result) * 0.5).min((result - down) * 0.5);
+        let raw = delta.abs() + self.sigma;
+        let err = if raw == 0.0 { 0.0 } else { next_up(raw) };
+        if err < gap {
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+#[inline(always)]
+fn split(run: &mut Run, a: f64, b: f64) -> (f64, f64) {
+    run.flags |= bad_class(a) | bad_class(b);
+    let hi = a * b;
+    let lo = a.mul_add(b, -hi);
+    run.flags |= bad_class(hi) | bad_class(lo);
+    (hi, lo)
+}
+
+#[inline(always)]
+fn try_values(n: usize, mut f: impl FnMut(usize) -> f64) -> Option<f64> {
+    let mut run = Run::new();
+    for i in 0..n {
+        run.push(f(i));
+    }
+    run.finish()
+}
+
+#[inline(always)]
+fn try_prod(n: usize, mut f: impl FnMut(usize) -> (f64, f64)) -> Option<f64> {
+    let mut run = Run::new();
+    for i in 0..n {
+        let (a, b) = f(i);
+        let (hi, lo) = split(&mut run, a, b);
+        run.push(hi);
+        if lo != 0.0 {
+            run.push(lo);
+        }
+    }
+    run.finish()
+}
+
+#[inline(always)]
+fn try_prod3(n: usize, mut f: impl FnMut(usize) -> (f64, f64, f64)) -> Option<f64> {
+    let mut run = Run::new();
+    for i in 0..n {
+        let (a, b, c) = f(i);
+        let hi = a * b;
+        let lo = a.mul_add(b, -hi);
+        let h1 = hi * c;
+        let l1 = hi.mul_add(c, -h1);
+        run.flags |= bad_class(a) | bad_class(b) | bad_class(c) | bad_class(hi) | bad_class(lo);
+        run.push(h1);
+        if l1 != 0.0 {
+            run.push(l1);
+        }
+        if lo != 0.0 {
+            let h2 = lo * c;
+            let l2 = lo.mul_add(c, -h2);
+            run.flags |= bad_class(h2) | bad_class(l2);
+            run.push(h2);
+            if l2 != 0.0 {
+                run.push(l2);
+            }
+        }
+    }
+    run.finish()
+}
+
 /// Exactly rounded sum of `xs`.
 pub fn sum(xs: &[f64]) -> f64 {
+    if let Some(v) = try_values(xs.len(), |i| xs[i]) {
+        return v;
+    }
     let mut a = ExactAcc::new();
     xs.iter().for_each(|&x| a.add(x));
     a.round()
@@ -267,8 +471,49 @@ pub fn sum(xs: &[f64]) -> f64 {
 
 /// Exactly rounded dot product of `x` and `y`.
 pub fn dot(x: &[f64], y: &[f64]) -> f64 {
+    if x.len() == y.len() {
+        if let Some(v) = try_prod(x.len(), |i| (x[i], y[i])) {
+            return v;
+        }
+    }
     let mut a = ExactAcc::new();
     x.iter().zip(y).for_each(|(&p, &q)| a.add_prod(p, q));
+    a.round()
+}
+
+/// Sum of `f(i).0 * f(i).1`, or `None` when the compensated bound is not strict.
+pub fn sum_prod(n: usize, f: impl FnMut(usize) -> (f64, f64)) -> Option<f64> {
+    try_prod(n, f)
+}
+
+/// Sum of `f(i).0 * f(i).1 * f(i).2`, or `None` when the bound is not strict.
+pub fn sum_prod3(n: usize, f: impl FnMut(usize) -> (f64, f64, f64)) -> Option<f64> {
+    try_prod3(n, f)
+}
+
+/// Sum of `f(i).0 * f(i).1` rounded once.
+///
+/// The compensated pre-pass is only a win for short sums. A Kabsch dot of a
+/// few hundred atoms is faster as a straight integer product, and a rejected
+/// bound would pay both, so this always uses [`ExactAcc`].
+#[inline]
+pub fn dot_prod(n: usize, mut f: impl FnMut(usize) -> (f64, f64)) -> f64 {
+    let mut a = ExactAcc::new();
+    for i in 0..n {
+        let (p, q) = f(i);
+        a.add_prod(p, q);
+    }
+    a.round()
+}
+
+/// Sum of `f(i).0 * f(i).1 * f(i).2` rounded once. See [`dot_prod`].
+#[inline]
+pub fn dot_prod3(n: usize, mut f: impl FnMut(usize) -> (f64, f64, f64)) -> f64 {
+    let mut a = ExactAcc::new();
+    for i in 0..n {
+        let (p, q, r) = f(i);
+        a.add_prod3(p, q, r);
+    }
     a.round()
 }
 
@@ -366,5 +611,56 @@ mod tests {
             m.merge(&ExactAcc::from_bytes(&p.to_bytes()).unwrap());
         }
         assert_eq!(m.round().to_bits(), fwd.to_bits());
+    }
+
+    #[test]
+    fn compensated_matches_exact_acc() {
+        let mut s = 0x0fed_cba9_8765_4321u64;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s as f64 / u64::MAX as f64 - 0.5) * 8.0
+        };
+        for n in [1usize, 3, 17, 500, 1_500] {
+            let x: Vec<f64> = (0..n).map(|_| next()).collect();
+            let y: Vec<f64> = (0..n).map(|_| next()).collect();
+            let z: Vec<f64> = (0..n).map(|_| next().abs() + 0.1).collect();
+            let mut slow = ExactAcc::new();
+            x.iter().zip(&y).for_each(|(&p, &q)| slow.add_prod(p, q));
+            assert_eq!(dot(&x, &y).to_bits(), slow.round().to_bits(), "dot {n}");
+            assert!(sum_prod(n, |i| (x[i], y[i])).is_some(), "certified dot {n}");
+            let mut slow = ExactAcc::new();
+            for i in 0..n {
+                slow.add_prod3(z[i], x[i], y[i]);
+            }
+            assert_eq!(
+                dot_prod3(n, |i| (z[i], x[i], y[i])).to_bits(),
+                slow.round().to_bits(),
+                "dot3 {n}"
+            );
+            assert!(
+                sum_prod3(n, |i| (z[i], x[i], y[i])).is_some(),
+                "certified dot3 {n}"
+            );
+            let xs: Vec<f64> = (0..n).map(|_| next()).collect();
+            let mut slow = ExactAcc::new();
+            xs.iter().for_each(|&v| slow.add(v));
+            assert_eq!(sum(&xs).to_bits(), slow.round().to_bits(), "sum {n}");
+        }
+        // Wide cancellation still matches, whether or not the bound certifies.
+        let m: Vec<f64> = (0..500).map(|i| 1.0 + i as f64 * 0.11).collect();
+        let tot = sum(&m);
+        let w: Vec<f64> = m.iter().map(|x| x / tot).collect();
+        let a: Vec<f64> = (0..500).map(|i| (i as f64) * 0.017 - 3.0).collect();
+        let b: Vec<f64> = (0..500).map(|i| (i as f64) * -0.013 + 1.5).collect();
+        assert!(
+            sum_prod3(500, |i| (w[i], a[i], b[i])).is_some(),
+            "covariance-shaped triple product did not certify"
+        );
+        let xs = [1e100, 1.0, -1e100, 1e-20, -1e-20];
+        let mut slow = ExactAcc::new();
+        xs.iter().for_each(|&v| slow.add(v));
+        assert_eq!(sum(&xs).to_bits(), slow.round().to_bits());
     }
 }

@@ -17,10 +17,23 @@ def test_block_partition_covers_in_order(n, size):
     assert got == list(range(n))
 
 
-def test_tiles_cover_upper_triangle_once():
-    seen = np.concatenate([parallel._tile_pairs(a, b, 23, 5) for a, b in parallel._tiles(23, 5)])
-    want = {(i, j) for i in range(23) for j in range(i + 1, 23)}
-    assert len(seen) == len(want) and {tuple(p) for p in seen} == want
+def test_row_blocks_partition_the_triangle():
+    m, size = 23, 4
+    seen = []
+    counts = []
+    for rank in range(size):
+        rows = parallel.row_block(m, size, rank)
+        n = 0
+        for i in rows:
+            for j in range(i + 1, m):
+                seen.append((i, j))
+                n += 1
+        counts.append(n)
+    want = [(i, j) for i in range(m) for j in range(i + 1, m)]
+    assert seen == want
+    assert max(counts) - min(counts) <= m
+    assert parallel.row_block(0, 3, 1) == range(0)
+    assert parallel.row_block(4, 1, 0) == range(3)
 
 
 def test_serial_calls_match_kernels():

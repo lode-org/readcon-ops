@@ -7,9 +7,11 @@ the same bits for any thread count.
 
 ``exact=True`` (compiled path only) makes every reduction exactly rounded:
 centroids, the Kabsch covariance, RMSD, kinetic energy and band means are
-summed in a wide integer accumulator and rounded once. Those values then
-do not depend on the atom order, the frame split, the thread count or the
-MPI rank count. The default is the float path.
+the correctly rounded exact sum, from a wide integer accumulator (a short
+compensated pre-pass is used only when its error bound proves that rounding
+and the sum is small). Those values do not depend on the atom order, the
+frame split, the thread count or the MPI rank count. The default is the
+float path.
 """
 
 from __future__ import annotations

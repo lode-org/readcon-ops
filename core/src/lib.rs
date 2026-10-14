@@ -7,9 +7,10 @@
 //! on the thread count. Rust does not contract `a * b + c` into an FMA
 //! unless asked, so the same expression rounds the same way on every CPU.
 //!
-//! With the `exact` feature, each reduction can instead use
-//! [`exact::ExactAcc`], which rounds once and gives the same bits for any
-//! input order, thread count or rank count.
+//! With the `exact` feature, each reduction rounds once through
+//! [`exact::ExactAcc`]. Plain sums try a compensated pre-pass first and keep
+//! it only when its error bound proves the correctly rounded value. Either
+//! way the bits do not depend on input order, thread count or rank count.
 
 #[cfg(feature = "exact")]
 pub mod exact;
@@ -61,11 +62,7 @@ pub fn centroid(r: &[Row], w: &[f64], mode: Sum) -> Row {
         }
         #[cfg(feature = "exact")]
         Sum::Exact => {
-            let c = |d: usize| {
-                let mut a = exact::ExactAcc::new();
-                r.iter().zip(w).for_each(|(p, &q)| a.add_prod(q, p[d]));
-                a.round()
-            };
+            let c = |d: usize| exact::dot_prod(r.len(), |i| (w[i], r[i][d]));
             [c(0), c(1), c(2)]
         }
     }
@@ -84,15 +81,10 @@ pub fn rmsd(a: &[Row], b: &[Row], mode: Sum) -> f64 {
             x * x + y * y + z * z
         }),
         #[cfg(feature = "exact")]
-        Sum::Exact => {
-            let mut acc = exact::ExactAcc::new();
-            for i in 0..n {
-                for k in 0..3 {
-                    acc.add_prod(d(i, k), d(i, k));
-                }
-            }
-            acc.round()
-        }
+        Sum::Exact => exact::dot_prod(n * 3, |t| {
+            let d = a[t / 3][t % 3] - b[t / 3][t % 3];
+            (d, d)
+        }),
     };
     (s / n as f64).sqrt()
 }
@@ -105,13 +97,7 @@ pub fn covariance(a: &[Row], b: &[Row], w: &[f64], mode: Sum) -> Matrix3<f64> {
             h[(j, k)] = match mode {
                 Sum::Float => lanes_sum(a.len(), |i| w[i] * a[i][j] * b[i][k]),
                 #[cfg(feature = "exact")]
-                Sum::Exact => {
-                    let mut acc = exact::ExactAcc::new();
-                    for i in 0..a.len() {
-                        acc.add_prod3(w[i], a[i][j], b[i][k]);
-                    }
-                    acc.round()
-                }
+                Sum::Exact => exact::dot_prod3(a.len(), |i| (w[i], a[i][j], b[i][k])),
             };
         }
     }
@@ -125,16 +111,10 @@ pub fn kinetic_energy(m: &[f64], v: &[Row], mode: Sum) -> f64 {
             0.5 * m[i] * (v[i][0] * v[i][0] + v[i][1] * v[i][1] + v[i][2] * v[i][2])
         }),
         #[cfg(feature = "exact")]
-        Sum::Exact => {
-            let mut acc = exact::ExactAcc::new();
-            for i in 0..m.len() {
-                for k in 0..3 {
-                    // 0.5 * m is exact (a power-of-two scale) unless m is subnormal.
-                    acc.add_prod3(0.5 * m[i], v[i][k], v[i][k]);
-                }
-            }
-            acc.round()
-        }
+        Sum::Exact => exact::dot_prod3(m.len() * 3, |t| {
+            let (i, k) = (t / 3, t % 3);
+            (0.5 * m[i], v[i][k], v[i][k])
+        }),
     }
 }
 
@@ -279,22 +259,42 @@ pub fn pair_distances(r: &[Row]) -> Vec<f64> {
     out
 }
 
+/// Packed upper triangle of [`rmsd_matrix`] for rows `[i0, i1)`.
+///
+/// Row `i` contributes `rmsd(i, j)` for `j = i+1 .. m`, in that order.
+/// Rows run in parallel; each entry is one serial pair, so the bits do not
+/// depend on the thread count. The last row has no pairs.
+pub fn rmsd_upper(
+    frames: &[&[Row]],
+    w: &[f64],
+    align: bool,
+    mode: Sum,
+    i0: usize,
+    i1: usize,
+) -> Vec<f64> {
+    let m = frames.len();
+    let i0 = i0.min(m);
+    let i1 = i1.min(m).max(i0);
+    let mut rows: Vec<Vec<f64>> = vec![Vec::new(); i1 - i0];
+    rows.par_iter_mut().enumerate().for_each(|(k, row)| {
+        let i = i0 + k;
+        row.extend(((i + 1)..m).map(|j| pair_rmsd(frames[i], frames[j], w, align, mode)));
+    });
+    rows.into_iter().flatten().collect()
+}
+
 /// RMSD between every pair of frames, `m x m` row-major and symmetric.
 /// With `align`, each pair is Kabsch-aligned first (frame `j` onto `i`).
 /// Entry `(i, j)` for `i < j` is computed once and mirrored.
 pub fn rmsd_matrix(frames: &[&[Row]], w: &[f64], align: bool, mode: Sum) -> Vec<f64> {
     let m = frames.len();
+    let packed = rmsd_upper(frames, w, align, mode, 0, m);
     let mut out = vec![0.0; m * m];
-    let rows: Vec<Vec<(usize, f64)>> = (0..m)
-        .into_par_iter()
-        .map(|i| {
-            ((i + 1)..m)
-                .map(|j| (j, pair_rmsd(frames[i], frames[j], w, align, mode)))
-                .collect()
-        })
-        .collect();
-    for (i, row) in rows.into_iter().enumerate() {
-        for (j, v) in row {
+    let mut k = 0;
+    for i in 0..m {
+        for j in (i + 1)..m {
+            let v = packed[k];
+            k += 1;
             out[i * m + j] = v;
             out[j * m + i] = v;
         }
@@ -396,5 +396,49 @@ mod tests {
         let k2 = kabsch(&p(&a), &p(&b), &pw, e);
         assert_eq!(k1.rotation, k2.rotation);
         assert_eq!(k1.rmsd.to_bits(), k2.rmsd.to_bits());
+    }
+
+    #[cfg(feature = "exact")]
+    #[test]
+    fn exact_fast_path_matches_integer_accumulator() {
+        let a = cloud(240, 11);
+        let b = cloud(240, 12);
+        let m: Vec<f64> = (0..240).map(|i| 1.0 + (i as f64) * 0.37).collect();
+        let tot = exact::sum(&m);
+        let w: Vec<f64> = m.iter().map(|x| x / tot).collect();
+        let e = Sum::Exact;
+        for k in 0..3 {
+            let mut acc = exact::ExactAcc::new();
+            a.iter().zip(&w).for_each(|(p, &q)| acc.add_prod(q, p[k]));
+            assert_eq!(centroid(&a, &w, e)[k].to_bits(), acc.round().to_bits());
+        }
+        let mut acc = exact::ExactAcc::new();
+        for i in 0..a.len() {
+            for k in 0..3 {
+                let d = a[i][k] - b[i][k];
+                acc.add_prod(d, d);
+            }
+        }
+        let want = (acc.round() / a.len() as f64).sqrt();
+        assert_eq!(rmsd(&a, &b, e).to_bits(), want.to_bits());
+        for j in 0..3 {
+            for k in 0..3 {
+                let mut acc = exact::ExactAcc::new();
+                for i in 0..a.len() {
+                    acc.add_prod3(w[i], a[i][j], b[i][k]);
+                }
+                assert_eq!(
+                    covariance(&a, &b, &w, e)[(j, k)].to_bits(),
+                    acc.round().to_bits()
+                );
+            }
+        }
+        let mut acc = exact::ExactAcc::new();
+        for i in 0..m.len() {
+            for k in 0..3 {
+                acc.add_prod3(0.5 * m[i], a[i][k], a[i][k]);
+            }
+        }
+        assert_eq!(kinetic_energy(&m, &a, e).to_bits(), acc.round().to_bits());
     }
 }
