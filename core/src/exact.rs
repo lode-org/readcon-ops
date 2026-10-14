@@ -10,9 +10,13 @@
 //! [`sum`] and [`dot`] try a compensated sum of error-free product splits
 //! first, and keep it only when a running error bound sits strictly inside
 //! the correctly rounded bin. Longer products ([`dot_prod`], [`dot_prod3`])
-//! stay on [`ExactAcc`]: once the bound is checked, the compensated loop is
-//! not faster than the integer product. Both roundings are the exact sum, so
-//! the bits do not depend on order.
+//! try the same bound eight lanes at a time when AVX-512F is available, and
+//! the scalar compensated sum otherwise. A lane is one Neumaier state. The
+//! lanes merge by injecting each lane's error bound and then adding that
+//! lane's sum and compensation. The result is kept only when the merged
+//! bound still proves the correctly rounded value; otherwise the product
+//! uses [`ExactAcc`]. Both roundings are the exact sum, so the bits do not
+//! depend on order.
 //!
 //! Integer addition is associative and commutative, so the result does not
 //! depend on the order of the terms, on how they are split across threads
@@ -266,6 +270,8 @@ impl ExactAcc {
 }
 
 const U: f64 = f64::from_bits(0x3ca0_0000_0000_0000); // 2^-53
+const TWO_U: f64 = 2.0 * U;
+const BUMP: f64 = 16.0 * U;
 
 #[inline]
 fn next_up(x: f64) -> f64 {
@@ -344,9 +350,9 @@ impl Run {
         // |fl(c+delta)-(c+delta)| < 2 U (|c|+|delta|). Adding a relative
         // 16 U afterwards covers that product and the sigma add rounding down.
         let scale = self.comp.abs() + delta.abs();
-        let incr = (2.0 * U) * scale;
+        let incr = TWO_U * scale;
         self.sigma += incr;
-        self.sigma += self.sigma * (16.0 * U);
+        self.sigma += self.sigma * BUMP;
         self.flags |= bad_class(x)
             | bad_class(t)
             | bad_class(delta)
@@ -459,6 +465,149 @@ fn try_prod3(n: usize, mut f: impl FnMut(usize) -> (f64, f64, f64)) -> Option<f6
     run.finish()
 }
 
+/// Add a lane's absolute error bound. A zero bound is exact and is skipped;
+/// an empty lane therefore does not loosen the parent bound.
+#[inline(always)]
+fn inject_sigma(run: &mut Run, g: f64) {
+    if g == 0.0 {
+        return;
+    }
+    if !(g > 0.0) || g.is_subnormal() {
+        run.flags |= 1;
+        return;
+    }
+    run.sigma += g;
+    run.sigma += run.sigma * BUMP;
+    if !run.sigma.is_finite() || run.sigma < g {
+        run.flags |= 1;
+    }
+}
+
+/// Fold eight independent Neumaier states into one run.
+///
+/// Lane `i` satisfies `true = sum + comp + θ` with `|θ| <= sigma`. Injecting
+/// `sigma` and then pushing `sum` and `comp` leaves that residual inside the
+/// parent bound, and each push accounts for its own rounding.
+fn absorb_lanes(sum: [f64; 8], comp: [f64; 8], sigma: [f64; 8]) -> Run {
+    let mut run = Run::new();
+    for i in 0..8 {
+        inject_sigma(&mut run, sigma[i]);
+        if sum[i] != 0.0 {
+            run.push(sum[i]);
+        }
+        if comp[i] != 0.0 {
+            run.push(comp[i]);
+        }
+    }
+    run
+}
+
+#[cfg(target_arch = "x86_64")]
+#[path = "lane_asm.rs"]
+mod lane_asm;
+
+#[cfg(target_arch = "x86_64")]
+fn avx_prod(a: &[f64], b: &[f64]) -> Option<f64> {
+    let n = a.len();
+    let full = n / 8 * 8;
+    let st = unsafe { lane_asm::prod(a.as_ptr(), b.as_ptr(), full) };
+    if st.bad != 0 {
+        return None;
+    }
+    let mut run = absorb_lanes(st.sum, st.comp, st.sigma);
+    for j in full..n {
+        let (hi, lo) = split(&mut run, a[j], b[j]);
+        if hi != 0.0 {
+            run.push(hi);
+        }
+        if lo != 0.0 {
+            run.push(lo);
+        }
+    }
+    run.finish()
+}
+
+#[cfg(target_arch = "x86_64")]
+fn avx_prod3(a: &[f64], b: &[f64], c: &[f64]) -> Option<f64> {
+    let n = a.len();
+    let full = n / 8 * 8;
+    let st = unsafe { lane_asm::prod3(a.as_ptr(), b.as_ptr(), c.as_ptr(), full) };
+    if st.bad != 0 {
+        return None;
+    }
+    let mut run = absorb_lanes(st.sum, st.comp, st.sigma);
+    for j in full..n {
+        let (a, b, c) = (a[j], b[j], c[j]);
+        let hi = a * b;
+        let lo = a.mul_add(b, -hi);
+        let h1 = hi * c;
+        let l1 = hi.mul_add(c, -h1);
+        run.flags |= bad_class(a) | bad_class(b) | bad_class(c) | bad_class(hi) | bad_class(lo);
+        if h1 != 0.0 {
+            run.push(h1);
+        }
+        if l1 != 0.0 {
+            run.push(l1);
+        }
+        if lo != 0.0 {
+            let h2 = lo * c;
+            let l2 = lo.mul_add(c, -h2);
+            run.flags |= bad_class(h2) | bad_class(l2);
+            if h2 != 0.0 {
+                run.push(h2);
+            }
+            if l2 != 0.0 {
+                run.push(l2);
+            }
+        }
+    }
+    run.finish()
+}
+
+fn prepass_prod(a: &[f64], b: &[f64]) -> Option<f64> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("avx512f") {
+            return avx_prod(a, b);
+        }
+    }
+    try_prod(a.len(), |i| (a[i], b[i]))
+}
+
+fn prepass_prod3(a: &[f64], b: &[f64], c: &[f64]) -> Option<f64> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("avx512f") {
+            return avx_prod3(a, b, c);
+        }
+    }
+    try_prod3(a.len(), |i| (a[i], b[i], c[i]))
+}
+
+use std::cell::RefCell;
+
+#[derive(Default)]
+struct Scratch {
+    a: Vec<f64>,
+    b: Vec<f64>,
+    c: Vec<f64>,
+}
+
+thread_local! {
+    static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch {
+        a: Vec::new(),
+        b: Vec::new(),
+        c: Vec::new(),
+    });
+}
+
+fn with_scratch<R>(body: impl FnOnce(&mut Scratch) -> R) -> R {
+    let mut buf = SCRATCH.with(|s| s.take());
+    let out = body(&mut buf);
+    SCRATCH.with(|s| *s.borrow_mut() = buf);
+    out
+}
+
 /// Exactly rounded sum of `xs`.
 pub fn sum(xs: &[f64]) -> f64 {
     if let Some(v) = try_values(xs.len(), |i| xs[i]) {
@@ -493,28 +642,52 @@ pub fn sum_prod3(n: usize, f: impl FnMut(usize) -> (f64, f64, f64)) -> Option<f6
 
 /// Sum of `f(i).0 * f(i).1` rounded once.
 ///
-/// The compensated pre-pass is only a win for short sums. A Kabsch dot of a
-/// few hundred atoms is faster as a straight integer product, and a rejected
-/// bound would pay both, so this always uses [`ExactAcc`].
+/// The closure runs once. When the eight-lane bound (or the scalar bound, if
+/// AVX-512F is absent) certifies the rounding, that value is returned.
+/// Otherwise the stored factors go through [`ExactAcc`].
 #[inline]
 pub fn dot_prod(n: usize, mut f: impl FnMut(usize) -> (f64, f64)) -> f64 {
-    let mut a = ExactAcc::new();
-    for i in 0..n {
-        let (p, q) = f(i);
-        a.add_prod(p, q);
-    }
-    a.round()
+    with_scratch(|buf| {
+        buf.a.resize(n, 0.0);
+        buf.b.resize(n, 0.0);
+        for i in 0..n {
+            let (p, q) = f(i);
+            buf.a[i] = p;
+            buf.b[i] = q;
+        }
+        if let Some(v) = prepass_prod(&buf.a, &buf.b) {
+            return v;
+        }
+        let mut acc = ExactAcc::new();
+        for i in 0..n {
+            acc.add_prod(buf.a[i], buf.b[i]);
+        }
+        acc.round()
+    })
 }
 
 /// Sum of `f(i).0 * f(i).1 * f(i).2` rounded once. See [`dot_prod`].
 #[inline]
 pub fn dot_prod3(n: usize, mut f: impl FnMut(usize) -> (f64, f64, f64)) -> f64 {
-    let mut a = ExactAcc::new();
-    for i in 0..n {
-        let (p, q, r) = f(i);
-        a.add_prod3(p, q, r);
-    }
-    a.round()
+    with_scratch(|buf| {
+        buf.a.resize(n, 0.0);
+        buf.b.resize(n, 0.0);
+        buf.c.resize(n, 0.0);
+        for i in 0..n {
+            let (p, q, r) = f(i);
+            buf.a[i] = p;
+            buf.b[i] = q;
+            buf.c[i] = r;
+        }
+        if let Some(v) = prepass_prod3(&buf.a, &buf.b, &buf.c) {
+            return v;
+        }
+        let mut acc = ExactAcc::new();
+        for i in 0..n {
+            acc.add_prod3(buf.a[i], buf.b[i], buf.c[i]);
+        }
+        acc.round()
+    })
 }
 
 #[cfg(test)]
@@ -662,5 +835,192 @@ mod tests {
         let mut slow = ExactAcc::new();
         xs.iter().for_each(|&v| slow.add(v));
         assert_eq!(sum(&xs).to_bits(), slow.round().to_bits());
+    }
+
+    fn bits_prod(a: &[f64], b: &[f64]) {
+        let mut slow = ExactAcc::new();
+        for i in 0..a.len() {
+            slow.add_prod(a[i], b[i]);
+        }
+        let want = slow.round();
+        let got = dot_prod(a.len(), |i| (a[i], b[i]));
+        assert_eq!(got.to_bits(), want.to_bits(), "dot_prod n={}", a.len());
+        if let Some(fast) = prepass_prod(a, b) {
+            assert_eq!(fast.to_bits(), want.to_bits(), "prepass prod n={}", a.len());
+        }
+    }
+
+    fn bits_prod3(a: &[f64], b: &[f64], c: &[f64]) {
+        let mut slow = ExactAcc::new();
+        for i in 0..a.len() {
+            slow.add_prod3(a[i], b[i], c[i]);
+        }
+        let want = slow.round();
+        let got = dot_prod3(a.len(), |i| (a[i], b[i], c[i]));
+        assert_eq!(got.to_bits(), want.to_bits(), "dot_prod3 n={}", a.len());
+        if let Some(fast) = prepass_prod3(a, b, c) {
+            assert_eq!(
+                fast.to_bits(),
+                want.to_bits(),
+                "prepass prod3 n={}",
+                a.len()
+            );
+        }
+    }
+
+    #[test]
+    fn eight_lane_prepass_matches_exact_acc() {
+        bits_prod(&[], &[]);
+        bits_prod3(&[], &[], &[]);
+        bits_prod(&[1.0], &[1.0]);
+        bits_prod(&[0.0; 8], &[1.0; 8]);
+        bits_prod(&[-0.0; 8], &[1.0; 8]);
+        let mut ones = vec![0.0; 8];
+        ones[0] = 1.0;
+        ones[1] = 2f64.powi(-53);
+        bits_prod(&ones, &[1.0; 8]);
+        assert_eq!(dot_prod(8, |i| (ones[i], 1.0)).to_bits(), 1.0f64.to_bits());
+
+        let mut wide = vec![0.0; 16];
+        wide[0] = 1e100;
+        wide[8] = -1e100;
+        wide[1] = 1.0;
+        wide[9] = 1e-20;
+        bits_prod(&wide, &[1.0; 16]);
+        bits_prod(&[1e200; 8], &[1e200; 8]);
+        bits_prod(&[1e-320; 8], &[1.0; 8]);
+        assert!(prepass_prod(&[1e-320; 8], &[1.0; 8]).is_none());
+        assert!(prepass_prod(&[1e200; 8], &[1e200; 8]).is_none());
+        assert_eq!(dot_prod(8, |_| (1e200, 1e200)), f64::INFINITY);
+        assert_eq!(
+            prepass_prod(&[1.0; 16], &[2.0; 16]).unwrap().to_bits(),
+            32.0f64.to_bits()
+        );
+        bits_prod(&[0.1; 8], &[0.2; 8]);
+        assert!(prepass_prod(&[0.1; 8], &[0.2; 8]).is_some());
+
+        let mut s = 0x1234_5678_9abc_def0u64;
+        let mut next = |scale: f64| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s as f64 / u64::MAX as f64 - 0.5) * scale
+        };
+        for n in [1usize, 7, 8, 9, 15, 16, 17, 63, 64, 500] {
+            for scale in [1.0, 8.0, 1e6, 1e-6] {
+                let a: Vec<f64> = (0..n).map(|_| next(scale)).collect();
+                let b: Vec<f64> = (0..n).map(|_| next(scale)).collect();
+                let c: Vec<f64> = (0..n).map(|_| next(scale).abs() + 0.25).collect();
+                bits_prod(&a, &b);
+                bits_prod3(&a, &b, &c);
+            }
+        }
+
+        let m: Vec<f64> = (0..500).map(|i| 1.0 + i as f64 * 0.11).collect();
+        let tot = sum(&m);
+        let w: Vec<f64> = m.iter().map(|x| x / tot).collect();
+        let a: Vec<f64> = (0..500).map(|i| (i as f64) * 0.017 - 3.0).collect();
+        let b: Vec<f64> = (0..500).map(|i| (i as f64) * -0.013 + 1.5).collect();
+        bits_prod3(&w, &a, &b);
+        assert!(
+            prepass_prod3(&w, &a, &b).is_some(),
+            "eight-lane bound did not certify a covariance-shaped product"
+        );
+        let mut zeros = vec![1.0; 10];
+        zeros.iter_mut().step_by(2).for_each(|z| *z = 0.0);
+        bits_prod(&zeros, &[2.0; 10]);
+        bits_prod3(&zeros, &[2.0; 10], &[-3.0; 10]);
+    }
+
+    /// Release timing of one 500-atom covariance (nine triple products).
+    /// Checks stay on. No assertion on the times.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    #[ignore]
+    fn avx_prepass_vs_integer_acc() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let n = 500usize;
+        let m: Vec<f64> = (0..n).map(|i| 1.0 + i as f64 * 0.11).collect();
+        let tot = sum(&m);
+        let w: Vec<f64> = m.iter().map(|x| x / tot).collect();
+        let cols_a: Vec<[f64; 3]> = (0..n)
+            .map(|i| {
+                let t = i as f64;
+                [t * 0.017 - 3.0, t * 0.009 + 0.2, t * -0.004 + 1.0]
+            })
+            .collect();
+        let cols_b: Vec<[f64; 3]> = (0..n)
+            .map(|i| {
+                let t = i as f64;
+                [t * -0.013 + 1.5, t * 0.006 - 0.4, t * 0.002 + 0.7]
+            })
+            .collect();
+        let mut packed = Vec::new();
+        for j in 0..3 {
+            for k in 0..3 {
+                let a: Vec<f64> = cols_a.iter().map(|r| r[j]).collect();
+                let b: Vec<f64> = cols_b.iter().map(|r| r[k]).collect();
+                packed.push((a, b));
+            }
+        }
+        let certified = packed
+            .iter()
+            .all(|(a, b)| prepass_prod3(&w, a, b).is_some());
+        for (a, b) in &packed {
+            bits_prod3(&w, a, b);
+        }
+
+        let acc_one = |a: &[f64], b: &[f64]| {
+            let mut acc = ExactAcc::new();
+            for i in 0..n {
+                acc.add_prod3(w[i], a[i], b[i]);
+            }
+            acc.round()
+        };
+        let pre_one = |a: &[f64], b: &[f64]| prepass_prod3(&w, a, b).unwrap();
+        let hot_one = |a: &[f64], b: &[f64]| dot_prod3(n, |i| (w[i], a[i], b[i]));
+
+        let median = |body: &mut dyn FnMut()| {
+            let mut samples = Vec::new();
+            for _ in 0..2 {
+                body();
+            }
+            for _ in 0..9 {
+                let start = Instant::now();
+                for _ in 0..40 {
+                    body();
+                }
+                samples.push(start.elapsed().as_secs_f64() / 40.0);
+            }
+            samples.sort_by(|p, q| p.partial_cmp(q).unwrap());
+            samples[samples.len() / 2]
+        };
+
+        let acc_s = median(&mut || {
+            let mut sink = 0u64;
+            for (a, b) in &packed {
+                sink ^= acc_one(a, b).to_bits();
+            }
+            black_box(sink);
+        });
+        let pre_s = median(&mut || {
+            let mut sink = 0u64;
+            for (a, b) in &packed {
+                sink ^= pre_one(a, b).to_bits();
+            }
+            black_box(sink);
+        });
+        let hot_s = median(&mut || {
+            let mut sink = 0u64;
+            for (a, b) in &packed {
+                sink ^= hot_one(a, b).to_bits();
+            }
+            black_box(sink);
+        });
+        eprintln!(
+            "cov500x9 certified={certified} exactacc_s={acc_s:.6e} avx_checked_s={pre_s:.6e} hot_s={hot_s:.6e}"
+        );
     }
 }
