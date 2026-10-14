@@ -7,3 +7,4 @@ dist/
 docs/build/
 docs/doctrees/
 docs/source/**/*.rst
+core/target/

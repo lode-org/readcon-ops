@@ -1,0 +1,16 @@
+[project]
+name = "readcon-ops-core"
+version = "0.1.0"
+description = "Compiled kernels for readcon-ops"
+license = {text = "BSD-3-Clause"}
+requires-python = ">=3.11"
+authors = [{name = "Rohit Goswami", email = "rgoswami@ieee.org"}]
+dependencies = ["numpy>=1.24"]
+
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+features = ["python", "exact", "pyo3/extension-module"]
+module-name = "readcon_ops_core"
