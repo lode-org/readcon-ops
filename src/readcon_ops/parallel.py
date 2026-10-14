@@ -8,10 +8,11 @@ Determinism rules:
 - Frame work is block-partitioned: rank ``r`` of ``P`` gets a contiguous
   block, the remainder going to low ranks. Results are gathered in rank
   order, which is frame order.
-- All-pairs work is cut into square tiles of the upper triangle, dealt
-  block-cyclically (tile ``k`` to rank ``k % P``). Each entry is computed
-  by one rank with the serial kernel, so the matrix has the same bits for
-  every ``P``.
+- All-pairs work is split into contiguous row blocks of the upper triangle,
+  cut so each rank owns nearly the same number of pairs (row ``i`` owns
+  ``j > i``). Within a rank those rows run on rayon threads. Each entry is
+  computed by one rank with the serial kernel, then the packed doubles are
+  gathered in rank order, so the matrix has the same bits for every ``P``.
 - No float sum uses ``MPI_Allreduce``. The float path gathers the values
   in rank order and sums them once, which equals the serial sum. With
   ``exact=True`` each rank sends a fixed-size exact partial (1,665 bytes
@@ -54,20 +55,43 @@ def align_all(reference, frames, masses=None, exact: bool = False, comm=None):
     return np.concatenate([g[0] for g in got]), np.concatenate([g[1] for g in got])
 
 
-def _tiles(m: int, tile: int):
-    nt = -(-m // tile) if m else 0
-    return [(a, b) for a in range(nt) for b in range(a, nt)]
+def _pairs_before(m: int, rows: int) -> int:
+    """Upper-triangle pairs owned by rows ``[0, rows)``."""
+    return rows * (2 * m - rows - 1) // 2
 
 
-def _tile_pairs(a: int, b: int, m: int, tile: int) -> np.ndarray:
-    rows = range(a * tile, min(m, (a + 1) * tile))
-    cols = range(b * tile, min(m, (b + 1) * tile))
-    p = [(i, j) for i in rows for j in cols if i < j]
-    return np.array(p, dtype=np.int64).reshape(-1, 2)
+def row_block(m: int, size: int, rank: int) -> range:
+    """Contiguous rows of the upper triangle for ``rank`` of ``size``.
+
+    Row ``i`` owns pairs ``(i, j)`` with ``j > i``. The cut points are the
+    rows where the pair count crosses ``rank * total / size``, so the pair
+    counts differ by at most one row and the ranges partition ``0 .. m``.
+    """
+    if m <= 1 or size <= 0:
+        return range(0)
+
+    def rows_for(pairs: int) -> int:
+        lo, hi = 0, m
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if _pairs_before(m, mid) < pairs:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
+
+    total = m * (m - 1) // 2
+    return range(rows_for(rank * total // size), rows_for((rank + 1) * total // size))
 
 
 def rmsd_matrix(frames, masses=None, align: bool = True, exact: bool = False, comm=None, tile=64):
-    """:func:`readcon_ops.kernels.rmsd_matrix` with tiles dealt over ``comm``."""
+    """:func:`readcon_ops.kernels.rmsd_matrix` with rows dealt over ``comm``.
+
+    ``tile`` is accepted and ignored: the split is by balanced row blocks,
+    not by a square tile size.
+    """
+    if tile < 1:
+        raise ValueError("tile must be positive")
     if comm is None:
         return kernels.rmsd_matrix(frames, masses, align, exact)
     rank, size = _rs(comm)
@@ -77,18 +101,40 @@ def rmsd_matrix(frames, masses=None, align: bool = True, exact: bool = False, co
     m = len(fs)
     kernels._need(exact)
     w = kernels._w(masses, stack.shape[1] if m else 0, exact)
-    mine = [t for k, t in enumerate(_tiles(m, tile)) if k % size == rank]
-    pairs = [_tile_pairs(a, b, m, tile) for a, b in mine]
-    pairs = np.concatenate(pairs) if pairs else np.zeros((0, 2), dtype=np.int64)
+    if m <= 1:
+        return np.zeros((m, m))
+    rows = row_block(m, size, rank)
+    i0, i1 = rows.start, rows.stop
     if kernels.HAVE_CORE:
-        vals = kernels._core.pair_rmsds(stack, w, np.ascontiguousarray(pairs), align, exact)
+        vals = np.asarray(kernels._core.rmsd_upper(stack, w, i0, i1, align, exact), dtype=np.float64)
     else:
-        one = [kernels.rmsd_matrix([fs[i], fs[j]], masses, align)[0, 1] for i, j in pairs]
-        vals = np.array(one)
+        vals = np.array(
+            [
+                kernels.rmsd_matrix([fs[i], fs[j]], masses, align, exact)[0, 1]
+                for i in range(i0, i1)
+                for j in range(i + 1, m)
+            ],
+            dtype=np.float64,
+        )
+    # An empty numpy buffer is a null pointer; send one dummy double and a count of 0.
+    nsend = int(vals.size)
+    send = np.ascontiguousarray(vals, dtype=np.float64) if nsend else np.zeros(1, dtype=np.float64)
+    counts = comm.allgather(nsend)
+    recv = np.empty(sum(counts), dtype=np.float64)
+    comm.Allgatherv([send, nsend], (recv, counts))
+    spans = comm.allgather((i0, i1))
     out = np.zeros((m, m))
-    for p, v in comm.allgather((pairs, vals)):
-        out[p[:, 0], p[:, 1]] = v
-        out[p[:, 1], p[:, 0]] = v
+    offset = 0
+    for (a, b), count in zip(spans, counts, strict=True):
+        block = recv[offset : offset + count]
+        k = 0
+        for i in range(a, b):
+            n = m - i - 1
+            if n:
+                out[i, i + 1 :] = block[k : k + n]
+                out[i + 1 :, i] = block[k : k + n]
+                k += n
+        offset += count
     return out
 
 

@@ -114,8 +114,28 @@ fn rmsd_matrix<'py>(
     let f = self::frames(&frames)?;
     let w = weights.as_slice()?;
     let m = f.len();
-    let v = crate::rmsd_matrix(&f, w, align, mode(exact)?);
+    let md = mode(exact)?;
+    let v = py.detach(|| crate::rmsd_matrix(&f, w, align, md));
     Ok(PyArray1::from_vec(py, v).reshape([m, m])?.into_any())
+}
+
+/// Packed upper-triangle RMSDs for rows `[i0, i1)`, in row-major order.
+#[pyfunction]
+#[pyo3(signature = (frames, weights, i0, i1, align=true, exact=false))]
+fn rmsd_upper<'py>(
+    py: Python<'py>,
+    frames: PyReadonlyArray3<'py, f64>,
+    weights: PyReadonlyArray1<'py, f64>,
+    i0: usize,
+    i1: usize,
+    align: bool,
+    exact: bool,
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    let f = self::frames(&frames)?;
+    let w = weights.as_slice()?;
+    let md = mode(exact)?;
+    let v = py.detach(|| crate::rmsd_upper(&f, w, align, md, i0, i1));
+    Ok(v.into_pyarray(py))
 }
 
 /// RMSD of the pairs `(i, j)` listed in `pairs` (k, 2), in that order.
@@ -134,10 +154,11 @@ fn pair_rmsds<'py>(
     let w = weights.as_slice()?;
     let p = pairs.as_slice()?;
     let md = mode(exact)?;
-    let v: Vec<f64> = p
-        .par_chunks(2)
-        .map(|ij| crate::pair_rmsd(f[ij[0] as usize], f[ij[1] as usize], w, align, md))
-        .collect();
+    let v: Vec<f64> = py.detach(|| {
+        p.par_chunks(2)
+            .map(|ij| crate::pair_rmsd(f[ij[0] as usize], f[ij[1] as usize], w, align, md))
+            .collect()
+    });
     Ok(v.into_pyarray(py))
 }
 
@@ -293,6 +314,7 @@ fn readcon_ops_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("HAS_EXACT", cfg!(feature = "exact"))?;
     m.add_function(wrap_pyfunction!(kabsch_batch, m)?)?;
     m.add_function(wrap_pyfunction!(rmsd_matrix, m)?)?;
+    m.add_function(wrap_pyfunction!(rmsd_upper, m)?)?;
     m.add_function(wrap_pyfunction!(pair_rmsds, m)?)?;
     m.add_function(wrap_pyfunction!(rmsd, m)?)?;
     m.add_function(wrap_pyfunction!(centroid, m)?)?;
