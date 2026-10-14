@@ -7,10 +7,10 @@
 //! on the thread count. Rust does not contract `a * b + c` into an FMA
 //! unless asked, so the same expression rounds the same way on every CPU.
 //!
-//! With the `exact` feature, each reduction rounds once through
-//! [`exact::ExactAcc`]. Plain sums try a compensated pre-pass first and keep
-//! it only when its error bound proves the correctly rounded value. Either
-//! way the bits do not depend on input order, thread count or rank count.
+//! With the `exact` feature, each reduction rounds once. A compensated
+//! pre-pass is kept only when its error bound proves the correctly rounded
+//! value; otherwise the sum uses [`exact::ExactAcc`]. Either way the bits do
+//! not depend on input order, thread count or rank count.
 
 #[cfg(feature = "exact")]
 pub mod exact;
