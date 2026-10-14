@@ -75,3 +75,38 @@ jobs:
         run: python -m pytest tests -q --tb=short
       - name: Benchmark smoke
         run: python bench/bench_kernels.py 20 50 1
+
+  mpi:
+    name: MPI ${{ matrix.mpi }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mpi: mpich
+            packages: mpich libmpich-dev
+            cc: mpicc.mpich
+            launcher: mpiexec.mpich -n
+          - mpi: openmpi
+            packages: openmpi-bin libopenmpi-dev
+            cc: mpicc.openmpi
+            launcher: mpiexec.openmpi --oversubscribe -n
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install one MPI implementation
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
+      - name: Install
+        run: |
+          MPICC=${{ matrix.cc }} python -m pip install --no-binary mpi4py mpi4py
+          python -m pip install -e . ./core
+      - name: Same bits on 1 to 4 ranks
+        run: |
+          set -euo pipefail
+          for p in 1 2 3 4; do
+            ${{ matrix.launcher }} $p python tests/mpi/check_parallel.py | tail -1 | tee -a digests.txt
+          done
+          test "$(awk '{print $3}' digests.txt | sort -u | wc -l)" -eq 1

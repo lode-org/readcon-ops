@@ -256,6 +256,25 @@ fn exact_partial<'py>(
     Ok(PyBytes::new(py, &a.to_bytes()))
 }
 
+/// Exact partial sum of `x * y * z` as bytes (for example `0.5 m v v`).
+#[cfg(feature = "exact")]
+#[pyfunction]
+fn exact_partial3<'py>(
+    py: Python<'py>,
+    x: PyReadonlyArray1<'py, f64>,
+    y: PyReadonlyArray1<'py, f64>,
+    z: PyReadonlyArray1<'py, f64>,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let (xs, ys, zs) = (x.as_slice()?, y.as_slice()?, z.as_slice()?);
+    check_len(xs.len(), ys.len(), "y")?;
+    check_len(xs.len(), zs.len(), "z")?;
+    let mut a = crate::exact::ExactAcc::new();
+    for i in 0..xs.len() {
+        a.add_prod3(xs[i], ys[i], zs[i]);
+    }
+    Ok(PyBytes::new(py, &a.to_bytes()))
+}
+
 /// Merge exact partials and round once.
 #[cfg(feature = "exact")]
 #[pyfunction]
@@ -285,6 +304,7 @@ fn readcon_ops_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(feature = "exact")]
     {
         m.add_function(wrap_pyfunction!(exact_partial, m)?)?;
+        m.add_function(wrap_pyfunction!(exact_partial3, m)?)?;
         m.add_function(wrap_pyfunction!(exact_round, m)?)?;
     }
     Ok(())

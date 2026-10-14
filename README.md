@@ -33,4 +33,6 @@ vertices = wulff_vertices(normals, energies)
 
 `readcon_ops.kernels` runs batch work over many frames: `align_all`, `rmsd_matrix`, `centroid`, `kinetic_energy`, `band_mean` and `pair_distances`. With the optional compiled extension (`pip install ./core`, crate `readcon-ops-core`) they use rayon threads and give the same bits for any thread count. Without it they fall back to numpy. `exact=True` sums every reduction in a wide integer accumulator and rounds once, so the result does not depend on atom order, threads or MPI ranks. The default is the float path. `bench/bench_kernels.py` times the three paths.
 
+`readcon_ops.parallel` takes an mpi4py communicator (`comm=`) and splits frames in blocks and all-pairs work in tiles over it. Reductions never use a float `Allreduce`: the float path gathers values in rank order and sums once, and `exact=True` merges 1,665-byte exact partials. Results have the same bits for every rank count. mpi4py is only used through the communicator you pass.
+
 Documentation sources are under `docs/orgmode` (tutorial, how-to, reference, explanation). Licence: BSD-3-Clause.
