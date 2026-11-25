@@ -9,7 +9,7 @@ authors = [{name = "Rohit Goswami", email = "rgoswami@ieee.org"}]
 dependencies = [
   "numpy>=1.24",
   "spglib>=2.5",
-  "minimage @ git+https://github.com/lode-org/minimage.git@7dd4982cd4bb6b8c117f736aabb1e705d8f240fd",
+  "minimage @ git+https://github.com/lode-org/minimage.git@a78009f2af73821ebbd30a736b2b671e5b63ce5e",
 ]
 keywords = ["readcon", "con", "structure", "matching"]
 

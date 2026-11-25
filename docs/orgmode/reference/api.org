@@ -43,7 +43,8 @@ It does not call spglib.
 * per_atom_distance
 
 ~per_atom_distance(dr, box)~ is the Euclidean norm of each row after the minimage wrap.
-The dependency is minimage commit ~0545e172d88a887c6d9d8e3977e5c12fc1ba6f38~ (tag v0.1.1).
+The dependency is minimage commit ~a78009f2af73821ebbd30a736b2b671e5b63ce5e~
+(minimage ~main~ on 2026-11-25).
 
 * wulff_vertices
 
