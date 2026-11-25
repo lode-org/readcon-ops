@@ -21,7 +21,7 @@ group = spacegroup(frame_a, atomic_number=lambda name: 29)
 vertices = wulff_vertices(normals, energies)
 ```
 
-`identical` keeps an index-matched atom taken, so a second atom cannot claim that site. Distances use [minimage](https://github.com/lode-org/minimage) at commit `0545e172d88a887c6d9d8e3977e5c12fc1ba6f38`, the v0.1.1 tag, the same wrap as vesin and linkcell.
+`identical` keeps an index-matched atom taken, so a second atom cannot claim that site. Distances use [minimage](https://github.com/lode-org/minimage) at commit `a78009f2af73821ebbd30a736b2b671e5b63ce5e`, minimage `main` on 2026-11-25, the same wrap as vesin and linkcell.
 
 `spacegroup` calls spglib and returns the international symbol, the international number, and the Hall number.
 
