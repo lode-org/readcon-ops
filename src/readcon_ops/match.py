@@ -361,6 +361,7 @@ def internal_motion(frame_a, frame_b, masses=None) -> AlignedFrame:
         rotation,
         _rmsd(moved, reference.r),
         undefined_axis,
+        mobile.source_ids,
     )
 
 

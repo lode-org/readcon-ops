@@ -55,3 +55,26 @@ See the how-to for the plane equation.
 
 ~rotate(coordinates, axis, center, angle)~ and ~rotation_matrix(axis, theta)~ rotate row coordinates.
 ~get_rotation_matrix~ is the name existing eOn callers use.
+
+* resolve_named_groups
+
+~resolve_named_groups(frame, selections, disjoint=False)~ returns a ~ResolvedGroups~.
+
+~selections~ maps a group name to a chemfiles selection string.
+The evaluator is ~chemfiles.Selection~.
+~AtomGroup.rows~ is a sorted tuple of 0-based indices into frame order.
+A later frame reuses those integers. The selection is not run again.
+~AtomGroup.source_ids~ is parallel to ~rows~ when every atom has an identity, and ~None~ when none do.
+On a type-grouped CON frame the identity is ~atom_id~, the index from before grouping, so it is not the row.
+~source_index.rows~ and ~source_index.sources~ are the two directions of that map.
+A repeated identity raises ~DuplicateSourceId~. A mixture of present and missing identities raises ~IncompleteSourceIds~.
+
+A ~chemfiles.Frame~ is evaluated on its own topology, so ~resname~, ~resid~, and ~resindex~ see its residues.
+Any other frame is projected in frame order.
+~metadata["chemfiles_residues"]~ is applied when it is present. Its atom indices are frame rows, the order left by CON import.
+A residue selector with no residue table raises ~MissingSelectionMetadata~.
+
+~disjoint=True~ rejects an empty group (~EmptyGroup~) and a shared row (~OverlappingGroups~).
+The default returns those groups as they matched.
+A selection whose context is a pair, an angle, or a dihedral raises ~SelectionContextError~.
+~as_frame~ keeps ~source_ids~ and does not keep the residue table. Pass the object that still carries the topology.

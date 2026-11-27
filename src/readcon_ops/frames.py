@@ -3,8 +3,10 @@
 A pyeonclient frame has ``r`` ``(N, 3)``, ``box`` ``(3, 3)``, ``names``,
 and ``__len__``. A ``readcon.ConFrame`` has ``cell``, ``angles``, and
 ``atoms`` (each atom has ``symbol``, ``x``, ``y``, ``z``, and optionally
-``mass``). ``xyz`` is used when it is present. ``metadata`` may carry
-``pbc`` and ``lattice_vectors``.
+``mass`` and ``atom_id``). ``xyz`` is used when it is present.
+``metadata`` may carry ``pbc`` and ``lattice_vectors``. ``atom_id`` is
+the index from before a type-grouped CON import. It is kept as
+``source_ids`` when every atom has one.
 
 Missing ``pbc`` means periodic in all three directions. ``lattice_vectors``
 are three row vectors and replace the length-angle cell when present.
@@ -22,19 +24,23 @@ import numpy as np
 
 
 class Frame:
-    """Positions, cell, names, masses, and periodic flags.
+    """Positions, cell, names, masses, periodic flags, and source identities.
 
-    ``r`` is ``(N, 3)`` Cartesian angstrom. ``box`` is ``(3, 3)`` with
-    lattice vectors as rows. ``pbc`` is three bools. ``periodic`` is true
-    when any flag is true.
+    ``r`` is ``(N, 3)`` Cartesian angstrom, in frame order. ``box`` is
+    ``(3, 3)`` with lattice vectors as rows. ``pbc`` is three bools.
+    ``periodic`` is true when any flag is true. ``source_ids`` is one
+    integer per row, or ``None`` when the input did not carry an identity
+    for every atom. On a type-grouped CON frame each value is the
+    0-based index from before grouping, so it is not the row number.
     """
 
-    def __init__(self, r, box, names, masses, pbc):
+    def __init__(self, r, box, names, masses, pbc, source_ids=None):
         self.r = np.array(r, dtype=float, copy=True)
         self.box = np.array(box, dtype=float, copy=True).reshape(3, 3)
         self.names = [str(name) for name in names]
         self.masses = None if masses is None else np.array(masses, dtype=float, copy=True)
         self.pbc = (bool(pbc[0]), bool(pbc[1]), bool(pbc[2]))
+        self.source_ids = _store_source_ids(source_ids, int(self.r.shape[0]))
 
     def __len__(self) -> int:
         return int(self.r.shape[0])
@@ -44,7 +50,7 @@ class Frame:
         return any(self.pbc)
 
     def copy(self) -> Frame:
-        return Frame(self.r, self.box, self.names, self.masses, self.pbc)
+        return Frame(self.r, self.box, self.names, self.masses, self.pbc, self.source_ids)
 
 
 class AlignedFrame(Frame):
@@ -57,8 +63,8 @@ class AlignedFrame(Frame):
     root-mean-square distance in angstrom.
     """
 
-    def __init__(self, r, box, names, masses, pbc, rotation, rmsd, undefined_axis):
-        super().__init__(r, box, names, masses, pbc)
+    def __init__(self, r, box, names, masses, pbc, rotation, rmsd, undefined_axis, source_ids=None):
+        super().__init__(r, box, names, masses, pbc, source_ids)
         if rotation is None:
             self.rotation = None
         else:
@@ -79,6 +85,7 @@ class AlignedFrame(Frame):
             self.rotation,
             self.rmsd,
             self.undefined_axis,
+            self.source_ids,
         )
 
 
@@ -151,6 +158,32 @@ def _pbc_from(obj, metadata) -> tuple[bool, bool, bool]:
     return (True, True, True)
 
 
+def _store_source_ids(values, count: int) -> np.ndarray | None:
+    if values is None:
+        return None
+    ids = np.array(values, dtype=np.int64, copy=True)
+    if ids.shape != (count,):
+        raise ValueError("source_ids must have one value per atom")
+    return ids
+
+
+def _protocol_source_ids(obj, count: int) -> np.ndarray | None:
+    values = getattr(obj, "source_ids", None)
+    if values is None:
+        values = getattr(obj, "atom_ids", None)
+    if values is None or isinstance(values, (str, bytes)) or callable(values):
+        return None
+    return _store_source_ids(values, count)
+
+
+def _atom_source_ids(atoms) -> np.ndarray | None:
+    if not atoms:
+        return None
+    if not all(getattr(atom, "atom_id", None) is not None for atom in atoms):
+        return None
+    return _store_source_ids([int(atom.atom_id) for atom in atoms], len(atoms))
+
+
 def _optional_masses(values, count: int) -> np.ndarray | None:
     if values is None:
         return None
@@ -202,7 +235,14 @@ def _from_protocol(obj) -> Frame:
     count = coords.shape[0]
     names = _names(obj.names, count)
     masses = _optional_masses(getattr(obj, "masses", None), count)
-    return Frame(coords, _box(obj.box), names, masses, _pbc_from(obj, None))
+    return Frame(
+        coords,
+        _box(obj.box),
+        names,
+        masses,
+        _pbc_from(obj, None),
+        _protocol_source_ids(obj, count),
+    )
 
 
 def _from_conframe(obj) -> Frame:
@@ -240,4 +280,4 @@ def _from_conframe(obj) -> Frame:
         box = _lattice_vectors(metadata["lattice_vectors"])
     else:
         box = lengths_angles_to_cell(obj.cell, obj.angles)
-    return Frame(coords, box, names, masses, _pbc_from(obj, metadata))
+    return Frame(coords, box, names, masses, _pbc_from(obj, metadata), _atom_source_ids(atoms))

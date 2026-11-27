@@ -26,3 +26,17 @@ The default is a uniform weight. A ~ConFrame~ mass array is available as ~as_fra
 ~internal_motion~ matches atom i to atom i.
 It does not permute.
 ~identical~ may rematch an unmatched atom of the same name inside ~epsilon_r~, and an index-matched atom stays taken.
+
+* Named groups
+
+~resolve_named_groups(reference, {"ligand": "resname LIG", "pocket": "resname POCK"}, disjoint=True)~ reads the reference once.
+The returned rows are the membership of each group.
+Index a later frame with those same integers.
+Do not evaluate the selection on the later frame.
+
+Rows are 0-based and follow frame order.
+After CON import that order is type-grouped, and ~source_ids~ still names the pre-group index.
+~source_index~ turns one into the other.
+
+A residue selector needs the chemfiles topology, or ~metadata["chemfiles_residues"]~ on the CON frame.
+~as_frame~ does not copy that table.
